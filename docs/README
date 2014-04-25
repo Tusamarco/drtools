@@ -1,0 +1,223 @@
+Innodb Recovery Howto
+=====================
+
+InnoDB is pretty stable and reliable storage engine, but even it could be corrupted in case of hardware failure or human mistakes. For example, you could have a failures in your RAID controller (due to cabling) or memory errors or someone could do "DELETE FROM some_table" and you'll lose your data.
+
+In many cases innodb's internal recovery code could not handle such problems and the only way to recover data is to work with innodb tablespaces directly. This is what you can do with our **innodb recovery toolkit** (_toolkit_ later in this document). 
+
+Tools Overview
+--------------
+
+Described toolkit consists of a set of useful tools for innodb recovery such as:
+
+* **`page_parser`** - this tools takes some InnoDB tablespace and splits it to a separate sets of pages grouped by tablespace ID and table ID.
+* **`constraints_parser`** - this tool takes some tablespace or any other file and tries to find your data in this file considering it as a part of real innodb tablespace.  
+* **`create_defs.pl`** - this tool uses your database server login/password to create table definitions for your database so these definitions could be used with constraints parser.
+* **`split_dump.pl`** - this tool splits constraints_parser tool output to a set of separate CSV files. 
+* **`show_data_dictionary`** (to be done in v.0.2+) - this tool tries to read and display innodb global data dictionary for a specified tablespace file.
+* **`checksum_tablespace`** (to be done in v.0.2+) - this tool tries to read an innodb tablespace and calculate its checksum to check if file is corrupted. 
+
+Pre-recovery Tablespace Processing
+----------------------------------
+
+Before you'd start recovering your data you'd definitely like to make a small research on your tablespace. So far we have no tools for innodb global data dictionary view, but you could use innodb's internal tools for this. One of the most useful is __table_monitor__. To use it you need to be able to at least start your mysql on your corrupted tablespace (see `innodb_force_recovery` option of mysqld). When you have your mysql up and running, just connect to any database (like mysql or test) and perform a following command:
+
+    CREATE TABLE innodb_table_monitor(x int) engine=innodb;
+
+This would force innodb engine to start table monitor and dump some useful data regarding your tablespaces in mysql's error log (log-error option).
+
+Most interesting information here is a mapping between your tables' primary indexes and table ids. For example you can get an output like this:
+
+    TABLE: name test/site_folders, id 0 119, columns 9, indexes 1, appr.rows 1
+      COLUMNS: id: DATA_INT len 4 prec 0; name: type 12 len 765 prec 0; sites_count: DATA_INT len 4 prec 0;
+	 		   created_at: DATA_INT len 8 prec 0; updated_at: DATA_INT len 8 prec 0; 
+	           DB_ROW_ID: DATA_SYS prtype 256 len 6 prec 0; DB_TRX_ID: DATA_SYS prtype 257 len 6 prec 0; 
+	           DB_ROLL_PTR: DATA_SYS prtype 258 len 7 prec 0; 
+	  INDEX: name PRIMARY, id 0 254, fields 1/7, type 3
+	   root page 271, appr.key vals 1, leaf pages 1, size pages 1
+	   FIELDS:  id DB_TRX_ID DB_ROLL_PTR name sites_count created_at updated_at
+
+Here you can see a list of fields in your table and, most interesting - you can see that the PRIMARY index for your table is mapped to `index_id`="0 254". Read below to see how to use this information.
+
+Working With a Part of InnoDB Tablespace
+----------------------------------------
+
+`heuristics_parser` tool works fine with any tablespace types (single and file-per-table), but in some cases you'd like to work with a smaller part of your data: huge tablespace files (10Gb+), tablespaces with many tables that have an identical structure or just for testing your table descriptions. 
+
+At this moment we have a `page_parser` tool which takes some tablespace and slices it to a set of pages grouped by `table_id`. Next steps you could make are:
+
+  * Prepare your table descriptions and test them on a separate pages.
+  * Concatenate all pages with one table_id and recover your table data.
+
+When you run `page_parser` your pages are placed in `pages-NNNNNNNN/HHHH-LLLL` directories where __NNNNNNNN__ is timestamp of the second when you started the tool, __HHHH__ and __LLLL__ are high and low words for `index_id` of a page. Every page would be placed in __III-NNNNN.page__ files where __III__ is a page number (offset / page size) and __NNNNN__ is `page_id` of a page.
+
+To concatenate some table pages in one files, you can use a following command:
+
+    $ cat *.page > my.tables
+
+Preparing a Tables Description File
+-----------------------------------
+
+First of all, what are these table definitions? The answer is simple: table definition is a simple, but really powerful set of rules which describe your table structure and help our tools recover your data. One table definition consists of a set of fields, each of which consists of:
+
+  * field type
+  * field size (fixed_size for fixed-size fields and min/max sizes for variable-size fields)
+  * NULL/NOT NULL specification for this field
+  * optional set of data constraints:
+    * `can_be_null` describes if NULL field can contain NULL values or not
+    * value limits for INT/UINT fields
+    * min/max values length for CHAR/TEXT fields
+    * character set for CHAR/TEXT fields
+    * values set for ENUM fields
+
+As of version 0.1 `constraints_parser` could work with compiled-in table definitions only. This mean that you need to write your table definitions and then compile your own version of tool binary. In next versions we're going to add some external config file support to be able to ship binary versions of our toolset.
+
+At this moment you have two options how to create your table definitions:
+  * you can create them manually from scratch (do not forget innodb's internal fields)
+  * or you can restore your tables (even empty) from backups and then start `create_defs.pl` script to get scaffolds for your definitions. 
+
+After an automatic table definitions generation you'll need to check fields limits, etc and fix defaults of they do not match your own data limits.
+
+Here is an example of `table_def.h` file with some table definition made by `create_defs.pl` script and adjusted to match real table constraints:
+    
+    #ifndef table_defs_h
+	#define table_defs_h
+
+	// Table definitions
+	table_def_t table_definitions[] = {
+		{
+			name: "some_table",
+			{
+				{ /* int(11) */
+					name: "id",
+					type: FT_INT,
+					fixed_length: 4,
+
+					has_limits: TRUE,
+					limits: {
+						int_min_val: 1,
+						int_max_val: 10000
+					},
+
+					can_be_null: FALSE
+				},
+				{ /* Innodb's internally used field */
+					name: "DB_TRX_ID",
+					type: FT_INTERNAL,
+					fixed_length: 6,
+
+					can_be_null: FALSE
+				},
+				{ /* Innodb's internally used field */
+					name: "DB_ROLL_PTR",
+					type: FT_INTERNAL,
+					fixed_length: 7,
+
+					can_be_null: FALSE
+				},
+				{ /* enum('yes','no') */
+					name: "auto_restart",
+					type: FT_ENUM,
+					fixed_length: 1,
+
+					has_limits: TRUE,
+					limits: {
+						enum_values_count: 2,
+						enum_values: { "yes", "no" }
+					},
+
+					can_be_null: FALSE
+				},
+				{ /* int(11) */
+					name: "num_created_today",
+					type: FT_INT,
+					fixed_length: 4,
+
+					can_be_null: FALSE
+				},
+				{ /* bigint(20) */
+					name: "time_yesterday",
+					type: FT_INT,
+					fixed_length: 8,
+
+					can_be_null: FALSE
+				},
+				{ /* varchar(20) */
+					name: "from_username",
+					type: FT_CHAR,
+					min_length: 0,
+					max_length: 20,
+
+					has_limits: TRUE,
+					limits: {
+						char_min_len: 0,
+						char_max_len: 15,
+						char_ascii_only: TRUE
+					},
+
+					can_be_null: FALSE
+				},
+				{ /* tinyint(1) */
+					name: "affiliate_admin",
+					type: FT_INT,
+					fixed_length: 1,
+
+					has_limits: TRUE,
+					limits: {
+						int_min_value: 0,
+						int_max_value: 1,
+						can_be_null: FALSE
+					},
+
+					can_be_null: TRUE
+				},				
+				{ type: FT_NONE }
+			}
+		}
+	};
+
+	#endif
+
+I'd like to bring your attention to two fields here (actually, tree, but in a definition above we see only two):
+  
+  - `DB_TRX_ID` - this field is managed by InnoDB internally and contains a ID of transaction which changed a record last time
+  - `DB_ROLL_PTR` - one more internal InnoDB field (TODO: find out what is it used for).
+  - `DB_ROW_ID` - this internally used field should be the first field in tables without primary keys (it is an auto-increment field used by InnoDB to identify rows in such tables)
+
+These two (or three) fields should be in your table definition (at least in v.0.1) to let `constraints_parser` to find your data in a tablespace.
+
+When `table_defs.h` file is ready, you can proceed with the toolset compilation to get a set of binaries specific for your own database (we'll try to avoid this compilation step in future releases).
+
+Toolset Compilation Procedure
+-----------------------------
+
+As mentioned before, in release 0.1 of the toolset you need to compile your own binaries to use our toolkit. Internally our toolset uses some low-level InnoDB code pieces to work with pages and fields in tablespaces. That is why we ship trimmed down version of mysql sources with our project (`mysql-source` directory). 
+
+We tried to make build process as simple as possible so after you have `table_defs.h` file created you can just run `make` and you should be done with building. If you'll get any problems, most possible they would be in mysql-sources building process. In this case you can just download mysql sources from [MySQL site](http://www.mysql.com), configure and build mysql as following:
+
+    $ ./configure
+    $ make
+
+and copy `MYSQL_SOURCES/innobase/ut/libut.a` file to toolkit build directory and try to run `make` again.
+
+If you'd like to build static versions of binaries, uncomment CFLAGS line in the Makefile.
+
+Data Recovery Process Explained
+-------------------------------
+
+Now, let's get to data recovery process. Recommended (really detailed) sequence of a actions for data recovery is a following:
+
+  1. Split your tablespace to pages with `page_parser`
+  2. Find your `index_id` values of a primary indexes for your pages.
+  3. Take one page from your most valuable table directory.
+  4. Create table definition for this table (automatically with `create_defs.pl` or manually).
+  5. Try to recover some data from this one page file in debug mode.
+  6. If no data was recovered, check your `table_defs.h` file and try again.
+  7. If everything worked fine, try to run `constraints_parser` in normal (non-debug) mode and check your data.
+  8. If data looks ok, then get all pages from your table's directory, concatenate them (`cat *.page > pages`) and try to recover all your table's data.
+  9. Repeat steps 3-8 for all tables you need.
+
+If you have no tables with an identical structure and you're pretty confident about your table definitions, you can recover your data from your tablespace data directly.
+
+If you are getting a lot of junk records in your `constraints_parser` output, try to set more limits in your definitions file so parser would know how to filter out these false positives.
+
