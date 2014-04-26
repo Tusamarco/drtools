@@ -177,9 +177,9 @@ inline void print_time(unsigned char* value, field_def_t *field) {
 		fprintf(f_result, "\"%02u:%02u:%02u.%d\"", hour, min, sec, frac);
 	}else{
 		ltime &= ~(1UL << 23);
-		sec = ltime % 60; ltime /= 60;
-		min = ltime % 60; ltime /= 60;
-		hour = ltime % 24;
+		sec = ltime % 100; ltime /= 100;
+		min = ltime % 100; ltime /= 100;
+		hour = ltime;
 		fprintf(f_result, "\"%02u:%02u:%02u\"", hour, min, sec);
 	}
 }
