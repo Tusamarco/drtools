@@ -25,7 +25,10 @@ bool process_compact = 0;
 bool process_56 = 0;
 char blob_dir[256] = ".";
 char dump_prefix[1024] = "default";
-
+char schema[1024] = "";
+int chunk_size=0;
+int current_chunck_number=0;
+char result_file[2048];
 dulint filter_id;
 bool use_filter_id = 0;
 
@@ -587,20 +590,20 @@ void process_ibfile(int fn) {
 
 	// Read pages to the end of file
 	while ((read_bytes = read(fn, page, UNIV_PAGE_SIZE)) == UNIV_PAGE_SIZE) {
-        pos = lseek(fn, 0, SEEK_CUR);
-        
-        if (pos % (UNIV_PAGE_SIZE * 10) == 0) {
-            fprintf(stderr, "%.2f%% done\n", 100.0 * pos / st.st_size);
-        }
+	      pos = lseek(fn, 0, SEEK_CUR);
+	      
+	      if (pos % (UNIV_PAGE_SIZE * 10) == 0) {
+		  fprintf(stderr, "%.2f%% done\n", 100.0 * pos / st.st_size);
+	      }
 
-	    if (deleted_pages_only) {
-    		free_offset = page_header_get_field(page, PAGE_FREE);
-    		if (page_header_get_field(page, PAGE_N_RECS) == 0 && free_offset == 0) continue;
-    		if (free_offset > 0 && page_header_get_field(page, PAGE_GARBAGE) == 0) continue;
-    		if (free_offset > UNIV_PAGE_SIZE) continue;
-    	}
-        
-        process_ibpage(page);
+	      if (deleted_pages_only) {
+		  free_offset = page_header_get_field(page, PAGE_FREE);
+		  if (page_header_get_field(page, PAGE_N_RECS) == 0 && free_offset == 0) continue;
+		  if (free_offset > 0 && page_header_get_field(page, PAGE_GARBAGE) == 0) continue;
+		  if (free_offset > UNIV_PAGE_SIZE) continue;
+	      }
+
+	      process_ibpage(page);
 	}
 	free(page);
 }
@@ -619,6 +622,19 @@ int open_ibfile(char *fname) {
 	return fn;
 }
 
+/****Open out file for write*****/
+FILE* open_outfile(FILE* f_result,char *fname){
+	// Skip non-regular files
+	printf("Output going to file: %s\n", fname);
+	if(NULL == (f_result = fopen(fname, "w"))){
+	    fprintf(stderr, "Can't open file %s for writing\n", fname);
+	    exit(-1);
+	}
+	
+	return f_result;
+  
+}
+
 /*******************************************************************/
 void set_filter_id(char *id) {
     int cnt = sscanf(id, "%lu:%lu", &filter_id.high, &filter_id.low);
@@ -634,7 +650,7 @@ void usage() {
 	  "Usage: ./constraints_parser -4|-5|-6 [-dDV] -f <InnoDB page or dir> [-T N:M] [-b <external pages directory>]\n"
 	  "  Where\n"
 	  "    -f <InnoDB page(s)> -- InnoDB page or directory with pages\n"
-	  "    -o <file> -- Save dump in this file. Otherwise print to stdout\n"
+	  "    -o <file> -- Save dump in this file. Otherwise print to stdout, if S is defined then the file will be split in chunks\n"
 	  "    -h  -- Print this help\n"
 	  "    -d  -- Process only those pages which potentially could have deleted records (default = NO)\n"
 	  "    -D  -- Recover deleted rows only (default = NO)\n"
@@ -646,6 +662,8 @@ void usage() {
 	  "    -T  -- retrieves only pages with index id = NM (N - high word, M - low word of id)\n"
 	  "    -b <dir> -- Directory where external pages can be found. Usually it is pages-XXX/FIL_PAGE_TYPE_BLOB/\n"
 	  "    -p prefix -- Use prefix for a directory name in LOAD DATA INFILE command\n"
+	  "    -S Max dimension in MB of an output csv file, when file dimension > S then the tool will create many chuncks\n YOU MUST specify \"o\" to use this option \n"
+	  "    -s schema name -- Use SCHEMA name in LOAD DATA INFILE command\n"
 	  "\n"
 	);
 }
@@ -656,14 +674,15 @@ int main(int argc, char **argv) {
 	int is_dir = 0;
 	struct stat st;
 	char src[256];
-
+	int fileSize = 0;
+	
 
 	char buffer[16*1024];
         setvbuf(stdout, buffer, _IOFBF, sizeof(buffer));
 
 	f_result = stdout;
-	char result_file[1024];
-	while ((ch = getopt(argc, argv, "456hdDUVf:T:b:p:o:")) != -1) {
+	
+	while ((ch = getopt(argc, argv, "456hdDUVf:T:b:p:s:o:S:")) != -1) {
 		switch (ch) {
 			case 'd':
 				deleted_pages_only = 1;
@@ -706,7 +725,7 @@ int main(int argc, char **argv) {
              	 		break;
             		case '6':
                 		process_56 = 1;
-             	 		break;
+             	 		break; 
             		case 'T':
                 		set_filter_id(optarg);
                 		break;
@@ -716,11 +735,21 @@ int main(int argc, char **argv) {
 			case 'p':
 				strncpy(dump_prefix, optarg, sizeof(dump_prefix));
 				break;
+			case 's':
+				strncpy(schema, optarg, sizeof(schema));
+				break;
+			case 'S':
+				chunk_size = atoi(optarg);
+				break;
 			default:
 			case '?':
 			case 'h':
 				usage();
 		}
+	}
+
+	if(chunk_size > 0){
+	  chunk_size = (chunk_size * 1024)*1024;
 	}
 
 	if(is_dir){
@@ -778,9 +807,10 @@ int main(int argc, char **argv) {
 		while(NULL != (de = readdir(src_dir))){
 			if(!strncmp(de->d_name, ".", sizeof(de->d_name))) continue;
 			if(!strncmp(de->d_name, "..", sizeof(de->d_name))) continue;
-            snprintf(src_file, sizeof(src_file), "%s/%s", src, de->d_name);
+			
+			snprintf(src_file, sizeof(src_file), "%s/%s", src, de->d_name);
 
-            strcpy(result[indexres++], src_file) ;
+			strcpy(result[indexres++], src_file) ;
 		//	if(debug){ 
 			//  fprintf(stderr, "Loading %s\n", src_file); 
 			  
@@ -813,10 +843,24 @@ int main(int argc, char **argv) {
 
 
 			indexres = 0;
+			struct stat st;
+			
 			//if(debug){
 			//fprintf(stderr, "Processing, \nTotal pages to process %d %s",file_count, ":");
 			  
 			//}
+			
+			if(!strcmp(result_file,"")
+			  && chunk_size > 0 ){
+			  char *result_file_n;
+			  asprintf(&result_file_n,"%s%s",result_file,"_chunk_0");
+			  if(NULL == (f_result = fopen(result_file_n, "w"))){
+				  fprintf(stderr, "Can't open file %s for writing\n", result_file);
+				  exit(-1);
+				  }
+			  
+			}
+			
 			while(indexres<file_count){
 				if(debug){fprintf(stderr, "%s", ".");}
 				//fprintf(stderr, "\nOpening file %s \n", result[indexres]);
@@ -825,10 +869,31 @@ int main(int argc, char **argv) {
 					perror("open_ibfile");
 					exit(-1);
 					}
-				process_ibfile(fn);
+
+				process_ibfile(fn);				
+				fflush(f_result);
+
+				stat(result_file,&st);
+				fileSize = st.st_size;
+				
+				if(!strcmp(result_file,"")
+				  && chunk_size > 0 
+				  && fileSize > chunk_size){
+
+				  char *result_file_n;
+				  asprintf(&result_file_n,"%s%s",result_file,"_chunk_0");
+				  fclose(f_result);
+				  
+				  if(NULL == (f_result = fopen(result_file, "w"))){
+					  fprintf(stderr, "Can't open file %s for writing\n", result_file);
+					  exit(-1);
+					  }
+				  
+				}
 				indexres++;
 				close(fn);
 			 }
+			 
 			if(debug){fprintf(stderr, "%s\n", "END Processing\n");}
 /*
  * END Patch /\
@@ -846,15 +911,32 @@ int main(int argc, char **argv) {
 		close(fn);
 		}
 
+
+
 	table_def_t *table = &(table_definitions[0]);
 	fprintf(stderr, "SET FOREIGN_KEY_CHECKS=0;\n");
 	fprintf(stderr, "LOAD DATA INFILE '");
 	if(f_result == stdout){
 		if(!strcmp(dump_prefix,"default")){
-		    fprintf(stderr, "%s/dumps/%s/%s", getenv("PWD"), dump_prefix, table->name);
+		    if(strcmp(schema,"") > 0){
+		      fprintf(stderr, "%s/dumps/%s/%s_%s", getenv("PWD"), dump_prefix, schema, table->name);
+		    }
+		    else{
+		      fprintf(stderr, "%s/dumps/%s/%s", getenv("PWD"), dump_prefix, table->name);
+		    }
 		}
 		else{
-		    fprintf(stderr, "%s/%s.csv", getenv("PWD"), table->name);
+		    if(strcmp(result_file,"") > 0){
+		      fprintf(stderr,"%s_chunk_%d.csv", result_file, current_chunck_number);
+		    }
+		    else{
+			  if(strcmp(schema,"") > 0){
+			    fprintf(stderr, "%s/%s_%s.csv", getenv("PWD"), schema, table->name);
+			  }
+			  else{
+			    fprintf(stderr, "%s/%s.csv", getenv("PWD"), table->name);
+			  }
+		    }
 		}
 	     }
 	else{
