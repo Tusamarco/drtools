@@ -14,7 +14,7 @@
 #include <check_data.h>
 #include <dirent.h>
 
-
+// version 4
 // Global flags from getopt
 bool deleted_pages_only = 0;
 bool deleted_records_only = 0;
