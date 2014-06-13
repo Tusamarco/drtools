@@ -64,9 +64,10 @@ printf " \t -k socket \n"
 printf " \t -v verbose mode  \n"
 printf " \t -A [0|1] ask for confirmation when extracting a table  \n"
 printf " \t -P Phase to start from:\n \t1 ibdata extract;\n \t2 compile table_def;\n \t3 run only table extraction  \n"
-printf " \t -r recovery mode [U undeleted | D deleted]  \n"
+printf " \t -m recovery mode [U undeleted | D deleted]  \n"
 printf " \t -F filter by <table_name>  \n"
 printf "run_data_extraction.sh -v -A 1 -F salaries -d employees -u stress -p tool -i 192.168.0.35 -x 5510 -s /home/mysql/instances/my56test1_recovery_PLMC -o /home/mysql/instances/my56test1_recovery_PLMC -r /home/mysql/recoverycode"
+printf "\n"
 }
 
 
@@ -155,7 +156,7 @@ while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:v" opt; do
        fi
        ;;
        
-    r)
+    m)
        RECOVERYMODE=$OPTARG
        if [ $VERBOSE -eq 1  ] ; then
            echo "Running using recovery mode $RECOVERYMODE"
@@ -230,6 +231,7 @@ done
       
         cd $DESTDIR;
         echo "current directory: `pwd`"
+        echo "${EXECDIR}/page_parser -f ${SOURCEDIR}/ibdata1 \n"
         `time ${EXECDIR}/page_parser -f ${SOURCEDIR}/ibdata1`
         
         TOCHANGE=`ls -d page*`;
@@ -258,7 +260,7 @@ done
 
         echo -n "Please check if the extracted structure is correct look in: $DESTDIR [y/n]  --> "
         read CONFIRMDELDIR
-        if [ "x${CONFIRMDELDIR}"="xy" ]
+        if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
             echo "Cool continue then"
         else
@@ -268,7 +270,7 @@ done
         echo "---------------------------"
         echo -n "(Re)Create the dictionary?: $DESTDIR [y/n]  --> "
         read CONFIRMDELDIR
-        if [ "x${CONFIRMDELDIR}"="xy" ]
+        if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
 	  echo "Loading dictionary information ...";
 	  `mysql $CONNECTIONPAR -D mysql -e "DROP schema if exists DRDICTIONARY"`;
@@ -281,11 +283,6 @@ done
             exit 0 
         fi 
         echo "---------------------------"
-
-        
-        
-        
-
         
     fi
     
@@ -303,10 +300,10 @@ done
 
         for schema in  $DATABASE ;
         do
-	    SCHEMA_RECOVERY="${schema}_recovery"
+	    SCHEMA_RECOVERY="${schema}"
             echo -n "Should I recreate the structure for SCHEMA = $SCHEMA_RECOVERY ?[y/n]  --> "
 	    read CONFIRMDELDIR
-	    if [ "x${CONFIRMDELDIR}"="xy" ]
+	    if [ "x${CONFIRMDELDIR}" == "xy" ]
 	    then
 		`mysql $CONNECTIONPAR -D mysql -e "create schema if not exists ${SCHEMA_RECOVERY}"`;
 		echo "EXECUTING sys_parser.... $EXECDIR/sys_parser $CONNECTIONPAR_C -d DRDICTIONARY -r 1 $schema"
@@ -321,7 +318,7 @@ done
 
 		  echo -n "Please check the status of the SCHEMA = $schema and press [y] to continue or [n] to exit ?[y/n]  --> "
 		  read CONFIRMDELDIR
-		  if [ "x${CONFIRMDELDIR}"="xy" ]
+		  if [ "x${CONFIRMDELDIR}" == "xy" ]
 		  then
 		     echo  "Continue......... to create table_def";		 
 		  else
@@ -374,7 +371,7 @@ done
     
         echo -n "Please check if the extracted table definition is correct look in: $EXECDIR/include/*.defrecovery [y/n]  --> "
         read CONFIRMDELDIR
-        if [ "x${CONFIRMDELDIR}"="xy" ]
+        if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
             echo "Cool continue then"
         else
@@ -392,6 +389,8 @@ done
     then
         echo "PHASE 3 ---------------------------"
         #for schematable in `find $EXECDIR/include/ -name *.defrecovery  -exec basename {} \\;`
+        
+        
         for schematable in `ls $EXECDIR/include/*.defrecovery | xargs -n1 basename`
         do
     #read the table name and schema
@@ -415,7 +414,7 @@ done
                     TABLE=`echo $TABLE|sed -e"s/#_XXX_PARTITIONED__XXX_//g" `
                 fi
     
-		if [ "#$FILTERBYTABLE" != "#" ]
+		if [ "#$FILTERBYTABLE" != "##" ]
 		then
 		    if [ "#$FILTERBYTABLE" != "#$TABLEFILTERNAME" ]
 		    then
@@ -471,7 +470,7 @@ done
 		    CONFIRMDELDIR="xn";
 		    echo -n "Process next Table ${TABLE}? [y/n]  --> "
 		    read CONFIRMDELDIR
-		    if [ "#${CONFIRMDELDIR}" = "#y" ]
+		    if [ "#${CONFIRMDELDIR}" == "#y" ]
 		    then
 			echo "Cool continue then ${CONFIRMDELDIR}"
 			break;
@@ -508,7 +507,7 @@ done
     
     #Parsing IBD file for the given table
     
-                echo "Pasing file $FILETOPARSE";
+                echo "Parsing file $FILETOPARSE";
                 cd $DESTDIR
                 echo "Current dir:`pwd`"
                 
@@ -517,13 +516,20 @@ done
                 TOCHANGE=`ls -d page*`;
                 `mv $DESTDIR/$TOCHANGE $DESTDIR/${SCHEMA}_${TABLE}`
                 
+                if [ ! -e ${DESTDIR}/load_${SCHEMA}.sql ]
+                then
+                  echo "Create SQL create file for ${SCHEMA} \n"
+		  touch ${DESTDIR}/load_${SCHEMA}.sql
+                fi
+                
                 printf "\n -------------------------- \n"   ;
                 TIMENOW=`date`;
     #extracting data
                 echo "Starting data extraction ${SCHEMA}_${TABLE} ${TIMENOW}";
-                echo "${EXECDIR}/constraints_parser -p${DESTDIR} -5Uf $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ > $DESTDIR/${SCHEMA}_${TABLE}.csv"
                 
-                `time ${EXECDIR}/constraints_parser -p${DESTDIR} -5Uf $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ > $DESTDIR/${SCHEMA}_${TABLE}.csv`
+                echo "${EXECDIR}/constraints_parser -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -o $DESTDIR/DATA_${SCHEMA}_${TABLE}"
+                
+                `time ${EXECDIR}/constraints_parser -s ${SCHEMA} -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S 5 -o $DESTDIR/DATA_${SCHEMA}_${TABLE} 2>> ${DESTDIR}/load_${SCHEMA}.sql`
                 
                 TIMENOW=`date`;
                 echo "Data extraction ENDS ${SCHEMA}_${TABLE} ${TIMENOW}";

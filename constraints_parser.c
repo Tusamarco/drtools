@@ -24,11 +24,11 @@ bool process_redundant = 0;
 bool process_compact = 0;
 bool process_56 = 0;
 char blob_dir[256] = ".";
-char dump_prefix[1024] = "default";
+char dump_prefix[1024] = "";
 char schema[1024] = "";
 int chunk_size=0;
 int current_chunck_number=0;
-char result_file[2048];
+char result_file[2048]="";
 dulint filter_id;
 bool use_filter_id = 0;
 
@@ -662,11 +662,91 @@ void usage() {
 	  "    -T  -- retrieves only pages with index id = NM (N - high word, M - low word of id)\n"
 	  "    -b <dir> -- Directory where external pages can be found. Usually it is pages-XXX/FIL_PAGE_TYPE_BLOB/\n"
 	  "    -p prefix -- Use prefix for a directory name in LOAD DATA INFILE command\n"
-	  "    -S Max dimension in MB of an output csv file, when file dimension > S then the tool will create many chuncks\n YOU MUST specify \"o\" to use this option \n"
+	  "    -S Max dimension in MB of an output csv file, when file dimension > S then the tool will create many chunks\n YOU MUST specify \"o\" to use this option \n"
 	  "    -s schema name -- Use SCHEMA name in LOAD DATA INFILE command\n"
 	  "\n"
 	);
 }
+
+void print_load(char* load_file){
+	char load_file_loc[2048];
+	strcpy(load_file_loc,load_file);
+	
+	//fprintf(stderr, "File to load _%s\n",load_file_loc);
+	//fprintf(stderr, "%d \n",strcmp(load_file_loc,""));
+	
+	
+	table_def_t *table = &(table_definitions[0]);
+	fprintf(stderr, "SET FOREIGN_KEY_CHECKS=0;\n");
+	fprintf(stderr, "LOAD DATA INFILE '");
+
+	if(strcmp(load_file_loc,"") > 0 ){
+	    fprintf(stderr,"%s", load_file);
+	}
+	else if (dump_prefix[0] !='\0'){
+	    if(schema[0] != '\0'){
+	      fprintf(stderr, "%s/%s_%s",  dump_prefix, schema, table->name);
+	    }
+	    else{
+	      fprintf(stderr, "%s/%s", dump_prefix, table->name);
+	    }
+	}
+	else {
+	      if(schema[0] != '\0'){
+		fprintf(stderr, "%s/%s_%s.csv", getenv("PWD"), schema, table->name);
+	      }
+	      else{
+		fprintf(stderr, "%s/%s.csv", getenv("PWD"), table->name);
+	      }
+	}
+		
+	fprintf(stderr, "' REPLACE INTO TABLE `%s` FIELDS TERMINATED BY '\\t' OPTIONALLY ENCLOSED BY '\"' LINES STARTING BY '%s\\t' ", table->name, table->name);
+	int i = 0;
+	int comma = 0;
+	int has_set = 0;
+	fprintf(stderr, "(");
+	for(i = 0; i < table->fields_count; i++) {
+		if(table->fields[i].type == FT_INTERNAL) continue;
+		if(comma) fprintf(stderr, ", ");
+		switch(table->fields[i].type){
+			case FT_BLOB:
+			case FT_BIN:
+				fprintf(stderr, "@var_%s", table->fields[i].name);
+				has_set = 1;
+				break;
+			case FT_BIT:
+				fprintf(stderr, "@var_%s", table->fields[i].name);
+				has_set = 1;
+				break;
+			default:
+				fprintf(stderr, "`%s`", table->fields[i].name);
+			}
+		comma = 1;
+		}
+	fprintf(stderr, ")");
+	comma = 0;
+	if(has_set){
+		fprintf(stderr, "\nSET\n");
+		for(i = 0; i < table->fields_count; i++) {
+			if(table->fields[i].type == FT_INTERNAL) continue;
+			switch(table->fields[i].type){
+				case FT_BLOB:
+				case FT_BIN:
+					if(comma) fprintf(stderr, ",\n");
+					fprintf(stderr, "    %s = UNHEX(@var_%s)", table->fields[i].name, table->fields[i].name);
+					comma = 1;
+					break;
+				case FT_BIT:
+					if(comma) fprintf(stderr, ",\n");
+					fprintf(stderr, "    %s = CAST(@var_%s AS UNSIGNED)", table->fields[i].name, table->fields[i].name);
+					comma = 1;
+					break;
+				default: break;
+				}
+			}
+		}
+	fprintf(stderr, ";\n");
+}	
 
 /*******************************************************************/
 int main(int argc, char **argv) {
@@ -675,7 +755,8 @@ int main(int argc, char **argv) {
 	struct stat st;
 	char src[256];
 	int fileSize = 0;
-	
+	int chunk=0;
+	char *result_file_n="";
 
 	char buffer[16*1024];
         setvbuf(stdout, buffer, _IOFBF, sizeof(buffer));
@@ -696,10 +777,10 @@ int main(int argc, char **argv) {
 				break;
 			case 'o':
 				strncpy(result_file, optarg, sizeof(result_file));
-				if(NULL == (f_result = fopen(result_file, "w"))){
+				/*if(NULL == (f_result = fopen(result_file, "w"))){
 					fprintf(stderr, "Can't open file %s for writing\n", result_file);
 					exit(-1);
-					}
+					}*/
 				break;
 			case 'f':
 				strncpy(src, optarg, sizeof(src));
@@ -850,20 +931,20 @@ int main(int argc, char **argv) {
 			  
 			//}
 			
-			if(!strcmp(result_file,"")
+			if((result_file[0] !='\0')
 			  && chunk_size > 0 ){
-			  char *result_file_n;
-			  asprintf(&result_file_n,"%s%s",result_file,"_chunk_0");
+			  asprintf(&result_file_n,"%s_chunk_0.csv",result_file);
 			  if(NULL == (f_result = fopen(result_file_n, "w"))){
 				  fprintf(stderr, "Can't open file %s for writing\n", result_file);
 				  exit(-1);
-				  }
+			  }
 			  
 			}
 			
 			while(indexres<file_count){
 				if(debug){fprintf(stderr, "%s", ".");}
 				//fprintf(stderr, "\nOpening file %s \n", result[indexres]);
+				
 				if(0 == (fn = open_ibfile(result[indexres]))){
 					fprintf(stderr, "Can't open %s\n", result[indexres]);
 					perror("open_ibfile");
@@ -872,28 +953,45 @@ int main(int argc, char **argv) {
 
 				process_ibfile(fn);				
 				fflush(f_result);
-
-				stat(result_file,&st);
-				fileSize = st.st_size;
 				
-				if(!strcmp(result_file,"")
+				if(chunk == 0){
+				  print_load(result_file_n);
+				  chunk=1;
+				}
+				
+				stat(result_file_n,&st);
+				fileSize = st.st_size;
+				//fprintf(stderr,"File dimension of %s = %d",result_file_n,fileSize);
+				
+				if(result_file_n[0] !='\0' 
 				  && chunk_size > 0 
-				  && fileSize > chunk_size){
-
-				  char *result_file_n;
-				  asprintf(&result_file_n,"%s%s",result_file,"_chunk_0");
-				  fclose(f_result);
+				  && fileSize > chunk_size)
+				{
+				    fclose(f_result);
 				  
-				  if(NULL == (f_result = fopen(result_file, "w"))){
-					  fprintf(stderr, "Can't open file %s for writing\n", result_file);
-					  exit(-1);
-					  }
+				    result_file_n="";
+				    asprintf(&result_file_n,"%s_chunk_%d.csv",result_file,chunk++);
+				    
+				    
+				    if(NULL == (f_result = fopen(result_file_n, "w"))){
+					    fprintf(stderr, "Can't open file %s for writing\n", result_file);
+					    exit(-1);
+				    }
+				    print_load(result_file_n);
+				  
+				  
+				  
+				 
 				  
 				}
+				
 				indexres++;
 				close(fn);
 			 }
-			 
+			 if(result_file[0] =='\0'){
+			   
+			    print_load("");
+			}
 			if(debug){fprintf(stderr, "%s\n", "END Processing\n");}
 /*
  * END Patch /\
@@ -911,87 +1009,14 @@ int main(int argc, char **argv) {
 		close(fn);
 		}
 
-
-
-	table_def_t *table = &(table_definitions[0]);
-	fprintf(stderr, "SET FOREIGN_KEY_CHECKS=0;\n");
-	fprintf(stderr, "LOAD DATA INFILE '");
-	if(f_result == stdout){
-		if(!strcmp(dump_prefix,"default")){
-		    if(strcmp(schema,"") > 0){
-		      fprintf(stderr, "%s/dumps/%s/%s_%s", getenv("PWD"), dump_prefix, schema, table->name);
-		    }
-		    else{
-		      fprintf(stderr, "%s/dumps/%s/%s", getenv("PWD"), dump_prefix, table->name);
-		    }
-		}
-		else{
-		    if(strcmp(result_file,"") > 0){
-		      fprintf(stderr,"%s_chunk_%d.csv", result_file, current_chunck_number);
-		    }
-		    else{
-			  if(strcmp(schema,"") > 0){
-			    fprintf(stderr, "%s/%s_%s.csv", getenv("PWD"), schema, table->name);
-			  }
-			  else{
-			    fprintf(stderr, "%s/%s.csv", getenv("PWD"), table->name);
-			  }
-		    }
-		}
-	     }
-	else{
-		fprintf(stderr, "%s", result_file);
-		}
-	fprintf(stderr, "' REPLACE INTO TABLE `%s` FIELDS TERMINATED BY '\\t' OPTIONALLY ENCLOSED BY '\"' LINES STARTING BY '%s\\t' ", table->name, table->name);
-	int i = 0;
-	int comma = 0;
-	int has_set = 0;
-	fprintf(stderr, "(");
-	for(i = 0; i < table->fields_count; i++) {
-		if(table->fields[i].type == FT_INTERNAL) continue;
-		if(comma) fprintf(stderr, ", ");
-		switch(table->fields[i].type){
-			case FT_BLOB:
-			case FT_BIN:
-				fprintf(stderr, "@var_%s", table->fields[i].name);
-				has_set = 1;
-				break;
-			case FT_BIT:
-				fprintf(stderr, "@var_%s", table->fields[i].name);
-				has_set = 1;
-				break;
-			default:
-				fprintf(stderr, "`%s`", table->fields[i].name);
-			}
-		comma = 1;
-		}
-	fprintf(stderr, ")");
-	comma = 0;
-	if(has_set){
-		fprintf(stderr, "\nSET\n");
-		for(i = 0; i < table->fields_count; i++) {
-			if(table->fields[i].type == FT_INTERNAL) continue;
-			switch(table->fields[i].type){
-				case FT_BLOB:
-				case FT_BIN:
-					if(comma) fprintf(stderr, ",\n");
-					fprintf(stderr, "    %s = UNHEX(@var_%s)", table->fields[i].name, table->fields[i].name);
-					comma = 1;
-					break;
-				case FT_BIT:
-					if(comma) fprintf(stderr, ",\n");
-					fprintf(stderr, "    %s = CAST(@var_%s AS UNSIGNED)", table->fields[i].name, table->fields[i].name);
-					comma = 1;
-					break;
-				default: break;
-				}
-			}
-		}
-	fprintf(stderr, ";\n");
+	
+	
 	if (!process_compact && !process_redundant) {
         printf("Error: Please, specify what format your datafile in. Use -4 for mysql 4.1 and below and -5 for 5.X+\n");
         usage();
 	}
 	
+	
 	return 0;
 }
+
