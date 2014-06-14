@@ -39,6 +39,7 @@ PHASE=0
 RECOVERYMODE=U
 FILTERBYTABLE="#"
 ASKCONFIRMATION=0
+CHUNKSIZE=200
 #
 # Use LSB init script functions for printing messages, if possible
 #
@@ -79,7 +80,7 @@ fi
 
 #shift 1
     echo "###################################################"
-while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:v" opt; do
+while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:S:v" opt; do
   case $opt in
     v)
        VERBOSE=1
@@ -168,7 +169,12 @@ while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:v" opt; do
            echo "Filtering the table extraction by table name $FILTERBYTABLE"
        fi
        ;;
-
+    S)
+       CHUNKSIZE=$OPTARG
+       if [ $VERBOSE -eq 1  ] ; then
+           echo "Chunk size is: $CHUNKSIZE"
+       fi
+       ;;
 
 
     \?)
@@ -527,9 +533,9 @@ done
     #extracting data
                 echo "Starting data extraction ${SCHEMA}_${TABLE} ${TIMENOW}";
                 
-                echo "${EXECDIR}/constraints_parser -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -o $DESTDIR/DATA_${SCHEMA}_${TABLE}"
+                echo "${EXECDIR}/constraints_parser -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S $CHUNKSIZE -o $DESTDIR/DATA_${SCHEMA}_${TABLE}"
                 
-                `time ${EXECDIR}/constraints_parser -s ${SCHEMA} -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S 5 -o $DESTDIR/DATA_${SCHEMA}_${TABLE} 2>> ${DESTDIR}/load_${SCHEMA}.sql`
+                `time ${EXECDIR}/constraints_parser -s ${SCHEMA} -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S $CHUNKSIZE -o $DESTDIR/DATA_${SCHEMA}_${TABLE} 2>> ${DESTDIR}/load_${SCHEMA}.sql`
                 
                 TIMENOW=`date`;
                 echo "Data extraction ENDS ${SCHEMA}_${TABLE} ${TIMENOW}";
