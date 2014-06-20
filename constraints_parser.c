@@ -14,7 +14,7 @@
 #include <check_data.h>
 #include <dirent.h>
 
-// version 4
+// version 5
 // Global flags from getopt
 bool deleted_pages_only = 0;
 bool deleted_records_only = 0;
@@ -755,14 +755,16 @@ int main(int argc, char **argv) {
 	struct stat st;
 	char src[256];
 	int fileSize = 0;
-	int chunk=0;
+	int chunk=-1;
 	char *result_file_n="";
-
+	
 	char buffer[16*1024];
+	char *cwd;
+	
         setvbuf(stdout, buffer, _IOFBF, sizeof(buffer));
 
 	f_result = stdout;
-	
+
 	while ((ch = getopt(argc, argv, "456hdDUVf:T:b:p:s:o:S:")) != -1) {
 		switch (ch) {
 			case 'd':
@@ -828,9 +830,31 @@ int main(int argc, char **argv) {
 				usage();
 		}
 	}
+	char buffpath[2048 + 1];
 
+	cwd=getcwd( buffpath, 2048 );
+
+	if (cwd != NULL){
+	   if(result_file[0] !='\0'){
+	     if(result_file[0] !='/'){
+	       asprintf(&result_file_n,"%s/%s",cwd,result_file);
+	       strcpy(result_file,result_file_n);
+	       result_file_n="";
+	      // fprintf(stdout, "Current path   %s\n", result_file);
+	       fflush(stdout);
+	       
+	    }
+	  }
+	}
+	else{
+           perror("getcwd() error");
+	  exit(-1);
+	}
+
+	
 	if(chunk_size > 0){
 	  chunk_size = (chunk_size * 1024)*1024;
+	  chunk = 0;
 	}
 
 	if(is_dir){
@@ -937,9 +961,18 @@ int main(int argc, char **argv) {
 			  if(NULL == (f_result = fopen(result_file_n, "w"))){
 				  fprintf(stderr, "Can't open file %s for writing\n", result_file);
 				  exit(-1);
+			    }
 			  }
-			  
+			  else if((result_file[0] !='\0')
+			  && chunk_size == 0 ){
+			  asprintf(&result_file_n,"%s.csv",result_file);
+			  if(NULL == (f_result = fopen(result_file, "w"))){
+				  fprintf(stderr, "Can't open file %s for writing\n", result_file);
+				  exit(-1);
+			    }
 			}
+			  
+			
 			
 			while(indexres<file_count){
 				if(debug){fprintf(stderr, "%s", ".");}
@@ -991,6 +1024,9 @@ int main(int argc, char **argv) {
 			 if(result_file[0] =='\0'){
 			   
 			    print_load("");
+			}
+			else if(chunk_size == 0){
+			  print_load(result_file_n);
 			}
 			if(debug){fprintf(stderr, "%s\n", "END Processing\n");}
 /*
