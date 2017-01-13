@@ -4,10 +4,12 @@ Note this is my working branch as such is not guarantee to work all the times.
 
 IMPORTANT
 =====================
+To compile be sure to have the correct mysql libraries for client, gcc and ncurses-devel.x86_64 installed
+
 To use the first time you must:
-1) go to the mysql-source directory 
+- go to the mysql-source directory 
 	run ./configure
-2) go one level up 
+- go one level up 
 	run make
 
 
