@@ -79,25 +79,25 @@ A simple example is:
 ./run_data_extraction.sh -v -d  employees -u stress -p tool -i 127.0.0.1 -x 3306 -s /opt/source_data -o /opt/destination_data -r /opt/drtools
 
 Valid options are 
- 	 -s root_directory_for_page_files 
- 	 -o destination_directory_for_data extract 
- 	 -r executable_dir 
- 	 -d database name to extract 
- 	 -u MySQL user 
- 	 -p MySQL password 
- 	 -i MySQL IP 
- 	 -x MySQL Port
- 	 -k socket 
- 	 -v verbose mode  
- 	 -A [0|1] ask for confirmation when extracting a table  
-	 -U [0|1] Unattended if set to 1 will run the whole process assuming YES is the answer to all questions 	 
-	 -P Phase to start from:
-	 	1 ibdata extract;
- 		2 compile table_def;
-	 	3 run only table extraction  
- 	 -m recovery mode [U undeleted | D deleted]  
- 	 -F filter by <table_name>  
- 	 -S Chunk size (in MB)
+*  -s root_directory_for_page_files 
+*  -o destination_directory_for_data extract 
+*  -r executable_dir 
+*  -d database name to extract 
+*  -u MySQL user 
+*  -p MySQL password 
+*  -i MySQL IP 
+*  -x MySQL Port
+*  -k socket 
+*  -v verbose mode  
+*  -A [0|1] ask for confirmation when extracting a table  
+*  -U [0|1] Unattended if set to 1 will run the whole process assuming YES is the answer to all questions 	 
+*  -P Phase to start from (number):
+  * 1 ibdata extract;
+  * 2 compile table_def;
+  * 3 run only table extraction  
+*  -m recovery mode [U undeleted | D deleted]  
+*  -F filter by <table_name>  
+*  -S Chunk size (in MB)
  	 
  	 
 
