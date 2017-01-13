@@ -35,12 +35,21 @@ The wrapper
 In real life using the tools by hand is just a nightmare and not really efficient, as such I have written a wrapper that allow to process the main steps.
 Obviously if you need to process some specific operation or special cases, you still need to do it by hand, but the tool can help you to reduce (90%) of the noise.
 
+**Keep in mind that the final result will be a script:** load\_*schema\_name*.sql 
+
+THe file will be loacated in the destination directory (that should always include the schema name) 
+
+This script can be load to a dummy instance to recreate the loast data:
+
+**mysql -u*user* -p -D *schema* < load\_*schema\_name*.sql**
+
+
 What you need to have to run it
 ----------------------------------
-1) the source files, ibdata, table spaces and so on 
-2) an EMPTY/Dummy mysql server to use for recover the data
-3) the DRTOOLS code
-4) a directory where to save the files while processing them (output)
+* 1 the source files, ibdata, table spaces and so on 
+* 2 an EMPTY/Dummy mysql server to use for recover the data
+* 3 the DRTOOLS code
+* 4 a directory where to save the files while processing them (output)
 
 
 The tool is conceptually split in 3 phases.
@@ -81,7 +90,8 @@ Valid options are
  	 -k socket 
  	 -v verbose mode  
  	 -A [0|1] ask for confirmation when extracting a table  
- 	 -P Phase to start from:
+	 -U [0|1] Unattended if set to 1 will run the whole process assuming YES is the answer to all questions 	 
+	 -P Phase to start from:
 	 	1 ibdata extract;
  		2 compile table_def;
 	 	3 run only table extraction  
