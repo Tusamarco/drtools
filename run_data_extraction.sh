@@ -15,7 +15,7 @@
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# GNU GUNATTENDEDeneral Public License for more details.
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
@@ -40,7 +40,9 @@ PHASE=0
 RECOVERYMODE=U
 FILTERBYTABLE="#"
 ASKCONFIRMATION=0
+UNATTENDED=0
 CHUNKSIZE=200
+CONFIRMDELDIR="n"
 #
 # Use LSB init script functions for printing messages, if possible
 #
@@ -65,6 +67,7 @@ printf " \t -x MySQL Port\n"
 printf " \t -k socket \n"
 printf " \t -v verbose mode  \n"
 printf " \t -A [0|1] ask for confirmation when extracting a table  \n"
+printf " \t -U [0|1] Unattended if set to 1 will run the whole process assuming YES is the answer to all questions  \n"
 printf " \t -P Phase to start from:\n \t1 ibdata extract;\n \t2 compile table_def;\n \t3 run only table extraction  \n"
 printf " \t -m recovery mode [U undeleted | D deleted]  \n"
 printf " \t -F filter by <table_name>  \n"
@@ -81,7 +84,7 @@ fi
 
 #shift 1
     echo "###################################################"
-while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:S:v" opt; do
+while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:U:S:v" opt; do
   case $opt in
     v)
        VERBOSE=1
@@ -92,6 +95,13 @@ while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:S:v" opt; do
            echo "ASKCONFIRMATION active"
        fi
        ;;
+    U)
+       UNATTENDED=1;
+       if [ $VERBOSE -eq 1  ] ; then
+           echo "UNATTENDED active"
+       fi
+       ;;
+
     s)
        SOURCEDIR=$OPTARG 
 
@@ -232,7 +242,14 @@ done
         else
              `rm -fr $DESTDIR/*`
             
-        fi 
+        fi
+	# I set the UNATTENDED only after the first queston given it may be too dangerous and can bring to data loss
+        if [ ${UNATTENDED} -eq 1 ]
+        then
+            CONFIRMDELDIR="y"
+        fi
+
+ 
             
         echo "Processing main IBDATA file  "
       
@@ -258,16 +275,20 @@ done
         
         echo "Current Path `pwd`"
         
-        `${EXECDIR}/bin/constraints_parser.SYS_TABLES  -p${DESTDIR} -4Uf FIL_PAGE_INDEX/0-1 > ${DESTDIR}/ibdata/SYS_TABLES.csv 2> ${DESTDIR}/ibdata/load_dictionary.sql`
-        `${EXECDIR}/bin/constraints_parser.SYS_INDEXES -p${DESTDIR} -4Uf FIL_PAGE_INDEX/0-3 > ${DESTDIR}/ibdata/SYS_INDEXES.csv 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
-	`${EXECDIR}/bin/constraints_parser.SYS_COLUMNS -p${DESTDIR} -4Uf FIL_PAGE_INDEX/0-2 > ${DESTDIR}/ibdata/SYS_COLUMNS.csv 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
-	`${EXECDIR}/bin/constraints_parser.SYS_FIELDS  -p${DESTDIR} -4Uf FIL_PAGE_INDEX/0-4 > ${DESTDIR}/ibdata/SYS_FIELDS.csv 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
+        `${EXECDIR}/bin/constraints_parser.SYS_TABLES  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-1 > ${DESTDIR}/ibdata/SYS_TABLES 2> ${DESTDIR}/ibdata/load_dictionary.sql`
+        `${EXECDIR}/bin/constraints_parser.SYS_INDEXES -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-3 > ${DESTDIR}/ibdata/SYS_INDEXES 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
+	`${EXECDIR}/bin/constraints_parser.SYS_COLUMNS -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-2 > ${DESTDIR}/ibdata/SYS_COLUMNS 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
+	`${EXECDIR}/bin/constraints_parser.SYS_FIELDS  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-4 > ${DESTDIR}/ibdata/SYS_FIELDS 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
         
         echo "---------------------------"        
 
         echo -n "Please check if the extracted structure is correct look in: $DESTDIR [y/n]  --> "
-        read CONFIRMDELDIR
-        if [ "x${CONFIRMDELDIR}" == "xy" ]
+        if [ ${UNATTENDED} -eq 0 ]
+	then
+	    read CONFIRMDELDIR
+	fi
+
+	if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
             echo "Cool continue then"
         else
@@ -276,7 +297,12 @@ done
         fi 
         echo "---------------------------"
         echo -n "(Re)Create the dictionary?: $DESTDIR [y/n]  --> "
-        read CONFIRMDELDIR
+        if [ ${UNATTENDED} -eq 0 ]
+        then
+            read CONFIRMDELDIR
+        fi
+        
+
         if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
 	  echo "Loading dictionary information ...";
@@ -309,7 +335,11 @@ done
         do
 	    SCHEMA_RECOVERY="${schema}"
             echo -n "Should I recreate the structure for SCHEMA = $SCHEMA_RECOVERY ?[y/n]  --> "
-	    read CONFIRMDELDIR
+	    if [ ${UNATTENDED} -eq 0 ]
+       	    then
+           	 read CONFIRMDELDIR
+       	    fi
+	   
 	    if [ "x${CONFIRMDELDIR}" == "xy" ]
 	    then
 		`mysql $CONNECTIONPAR -D mysql -e "create schema if not exists ${SCHEMA_RECOVERY}"`;
@@ -324,7 +354,13 @@ done
 		 `mysql $CONNECTIONPAR -D $SCHEMA_RECOVERY <  ${DESTDIR}/${schema}_definition.sql`;
 
 		  echo -n "Please check the status of the SCHEMA = $schema and press [y] to continue or [n] to exit ?[y/n]  --> "
-		  read CONFIRMDELDIR
+	          if [ ${UNATTENDED} -eq 0 ]
+        	  then
+	            read CONFIRMDELDIR
+        	  fi
+		  
+
+
 		  if [ "x${CONFIRMDELDIR}" == "xy" ]
 		  then
 		     echo  "Continue......... to create table_def";		 
@@ -377,7 +413,14 @@ done
     
     
         echo -n "Please check if the extracted table definition is correct look in: $EXECDIR/include/*.defrecovery [y/n]  --> "
-        read CONFIRMDELDIR
+	 if [ ${UNATTENDED} -eq 0 ]
+         then
+                read CONFIRMDELDIR
+ 	 else
+		CONFIRMDELDIR="y"
+         fi
+
+
         if [ "x${CONFIRMDELDIR}" == "xy" ]
         then
             echo "Cool continue then"
@@ -476,7 +519,7 @@ done
 		  do
 		    CONFIRMDELDIR="xn";
 		    echo -n "Process next Table ${TABLE}? [y/n]  --> "
-		    read CONFIRMDELDIR
+        	    read CONFIRMDELDIR
 		    if [ "#${CONFIRMDELDIR}" == "#y" ]
 		    then
 			echo "Cool continue then ${CONFIRMDELDIR}"
@@ -495,12 +538,12 @@ done
                 ESCTABLE=${TABLE//_/.\\_};
                 ESCSCHEMA=${SCHEMA//_/.\\_};
             
-                TABLEID=`cat ${DESTDIR}/ibdata/SYS_TABLES.csv|grep -e "SYS_TABLES.\"${ESCSCHEMA}/${ESCTABLE}\""|sed -e"s/\t/,/g"|awk -F ',' '{print $5}'|head -n 1`;
-                INDEXID=`cat ${DESTDIR}/ibdata/SYS_INDEXES.csv|grep -e "SYS_INDEXES.${TABLEID}"|grep PRIMARY|sed -e"s/\t/,/g"|awk -v r=${TABLEID} -F ',' '{if($4==r){print $5}else{print $4 $5}}'|head -n 1`;
+                TABLEID=`cat ${DESTDIR}/ibdata/SYS_TABLES|grep -e "SYS_TABLES.\"${ESCSCHEMA}/${ESCTABLE}\""|sed -e"s/\t/,/g"|awk -F ',' '{print $5}'|head -n 1`;
+                INDEXID=`cat ${DESTDIR}/ibdata/SYS_INDEXES|grep -e "SYS_INDEXES.${TABLEID}"|grep PRIMARY|sed -e"s/\t/,/g"|awk -v r=${TABLEID} -F ',' '{if($4==r){print $5}else{print $4 $5}}'|head -n 1`;
                 
 #                if [ $VERBOSE -eq 1  ] ; then
-#                  echo "cat ${DESTDIR}/ibdata/SYS_TABLES.csv|grep -e \"SYS_TABLES.\"${ESCSCHEMA}/${ESCTABLE}\"\"|sed -e\"s/\t/,/g\"|awk -F ',' '{print \$5}'"
-#		  echo "cat ${DESTDIR}/ibdata/SYS_INDEXES.csv|grep -e \"SYS_INDEXES.${TABLEID}\"|grep PRIMARY|sed -e\"s/\t/,/g\"|awk -F ',' '{if(\$4 == "${TABLEID}"){print \$5}else{exit 1}}'";
+#                  echo "cat ${DESTDIR}/ibdata/SYS_TABLES|grep -e \"SYS_TABLES.\"${ESCSCHEMA}/${ESCTABLE}\"\"|sed -e\"s/\t/,/g\"|awk -F ',' '{print \$5}'"
+#		  echo "cat ${DESTDIR}/ibdata/SYS_INDEXES|grep -e \"SYS_INDEXES.${TABLEID}\"|grep PRIMARY|sed -e\"s/\t/,/g\"|awk -F ',' '{if(\$4 == "${TABLEID}"){print \$5}else{exit 1}}'";
 #                fi
                 echo "Processing TableId $TABLEID with PK ID $INDEXID";
                 
