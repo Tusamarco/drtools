@@ -90,9 +90,9 @@ while getopts ":s:o:r:d:u:p:i:x:k:P:r:F:A:U:S:v" opt; do
        VERBOSE=1
        ;;
     A)
-       ASKCONFIRMATION=1;
+       ASKCONFIRMATION=$OPTARG;
        if [ $VERBOSE -eq 1  ] ; then
-           echo "ASKCONFIRMATION active"
+           echo "ASKCONFIRMATION = $ASKCONFIRMATION"
        fi
        ;;
     U)
@@ -461,14 +461,21 @@ done
                 then
                     TABLEFILTERNAME=${TABLE:0:($PARTITIONINDEX -1 )}
                     schematable="table_defs.${SCHEMA}.${TABLEFILTERNAME}.defrecovery"
-                    TABLE=`echo $TABLE|sed -e"s/#_XXX_PARTITIONED__XXX_//g" `
+                    TABLE=`echo $TABLE|sed -e"s/#_XXX_PARTITIONED__XXX_//g"`
+		 else
+		    TABLEFILTERNAME=$TABLE
                 fi
-    
+
+#  echo "$TABLE $TABLEFILTERNAME"
+  
 		if [ "#$FILTERBYTABLE" != "##" ]
 		then
 		    if [ "#$FILTERBYTABLE" != "#$TABLEFILTERNAME" ]
 		    then
+#echo "$FILTERBYTABLE   $TABLEFILTERNAME"
 			continue;
+		    else
+        echo "$FILTERBYTABLE   $TABLEFILTERNAME"
 		    fi
 		
 		fi
@@ -579,7 +586,7 @@ done
                 
                 echo "${EXECDIR}/constraints_parser -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S $CHUNKSIZE -o $DESTDIR/DATA_${SCHEMA}_${TABLE}"
                 
-                `time ${EXECDIR}/constraints_parser -s ${SCHEMA} -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S $CHUNKSIZE -o $DESTDIR/DATA_${SCHEMA}_${TABLE} 2>> ${DESTDIR}/load_${SCHEMA}.sql`
+               `time ${EXECDIR}/constraints_parser -s ${SCHEMA} -p${DESTDIR} -5${RECOVERYMODE}f $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_INDEX/0-${INDEXID} -b $DESTDIR/${SCHEMA}_${TABLE}/FIL_PAGE_TYPE_BLOB/ -S $CHUNKSIZE -o $DESTDIR/DATA_${SCHEMA}_${TABLE} 2>> ${DESTDIR}/load_${SCHEMA}.sql`
                 
                 TIMENOW=`date`;
                 echo "Data extraction ENDS ${SCHEMA}_${TABLE} ${TIMENOW}";
