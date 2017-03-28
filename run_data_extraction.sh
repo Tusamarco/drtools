@@ -275,11 +275,12 @@ done
         
         echo "Current Path `pwd`"
         
-        `${EXECDIR}/bin/constraints_parser.SYS_TABLES  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-1 > ${DESTDIR}/ibdata/SYS_TABLES 2> ${DESTDIR}/ibdata/load_dictionary.sql`
-        `${EXECDIR}/bin/constraints_parser.SYS_INDEXES -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-3 > ${DESTDIR}/ibdata/SYS_INDEXES 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
-	`${EXECDIR}/bin/constraints_parser.SYS_COLUMNS -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-2 > ${DESTDIR}/ibdata/SYS_COLUMNS 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
-	`${EXECDIR}/bin/constraints_parser.SYS_FIELDS  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-4 > ${DESTDIR}/ibdata/SYS_FIELDS 2>> ${DESTDIR}/ibdata/load_dictionary.sql`
         
+        `${EXECDIR}/bin/constraints_parser.SYS_TABLES  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-1 > ${DESTDIR}/ibdata/SYS_TABLES 2> ${DESTDIR}/ibdata/load_dictionaryT.sql`
+        `${EXECDIR}/bin/constraints_parser.SYS_INDEXES -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-3 > ${DESTDIR}/ibdata/SYS_INDEXES 2>> ${DESTDIR}/ibdata/load_dictionaryT.sql`
+	`${EXECDIR}/bin/constraints_parser.SYS_COLUMNS -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-2 > ${DESTDIR}/ibdata/SYS_COLUMNS 2>> ${DESTDIR}/ibdata/load_dictionaryT.sql`
+	`${EXECDIR}/bin/constraints_parser.SYS_FIELDS  -p${DESTDIR}/ibdata -4Uf FIL_PAGE_INDEX/0-4 > ${DESTDIR}/ibdata/SYS_FIELDS 2>> ${DESTDIR}/ibdata/load_dictionaryT.sql`
+        `cat ${DESTDIR}/ibdata/load_dictionaryT.sql |sed  -e "s/LOAD DATA/LOAD DATA LOCAL/g" > ${DESTDIR}/ibdata/load_dictionary.sql` 
         echo "---------------------------"        
 
         echo -n "Please check if the extracted structure is correct look in: $DESTDIR [y/n]  --> "
@@ -372,41 +373,63 @@ done
 		 
 	    fi 
          
-        
-        
-            for table in `find $SOURCEDIR/$schema/ -name *.ibd  -exec basename {} \;|awk -F '.' '{print $1}' `;
+            for table in `find $SOURCEDIR/${SCHEMA_RECOVERY}/ -name *.ibd  -exec basename {} \;|awk -F '.' '{print $1}' `;
             do
                 TABLEDEFINITIONNAME=""
                 PARTITIONINDEX=0
                 PARTITIONINDEX=`expr index "$table" \#`
                 #echo "PINDEX = $PARTITIONINDEX"
+                TABLENAME_SQL=""
                 
                 if [ $PARTITIONINDEX -gt 0 ]
                 then
                     
                     TABLEFILTERNAME=${table:0:($PARTITIONINDEX - 1)}"#_XXX_PARTITIONED__XXX_"${table:($PARTITIONINDEX - 1)}
+                    TABLENAME_SQL=${table:0:($PARTITIONINDEX - 1)}
                     TABLEDEFINITIONNAME=${table:0:($PARTITIONINDEX - 1)}
                     
                 
                 else
                     TABLEDEFINITIONNAME=$table
+                    TABLENAME_SQL=$table
                 fi
                 
                 if [ $VERBOSE -eq 1  ] ; then
-                    echo "Creating definition for table ($table) : $SOURCEDIR/$schema/$TABLEDEFINITIONNAME"
+                    echo "Creating definition for table ($table) : $SOURCEDIR/${SCHEMA_RECOVERY}/${TABLEDEFINITIONNAME}"
                     
                 fi
                 
-                DEFINITIONFILE="${EXECDIR}/include/table_defs.${schema}.${TABLEDEFINITIONNAME}.defrecovery"
-                #echo $DEFINITIONFILE
-    
-                `$EXECDIR/create_defs.pl $CONNECTIONPAR --db=$schema --table=$TABLEDEFINITIONNAME > $DEFINITIONFILE`
+                if [ ! -e $DESTDIR/${SCHEMA_RECOVERY} ]
+                then
+                    echo "Destination (${DESTDIR}/${SCHEMA_RECOVERY}/tablesdef/) directory not present I will create it";
+                    `mkdir -p ${DESTDIR}/${SCHEMA_RECOVERY}/tablesdef/`
+                    echo "---------------------------"
                 
+                fi
+                
+                DEFINITIONFILE="${EXECDIR}/include/table_defs.${schema}.${TABLEDEFINITIONNAME}.defrecovery"
+                
+                if [ $PARTITIONINDEX -gt 0 ]
+                then
+                    if [ $VERBOSE -eq 1  ] ; then
+                        echo "$EXECDIR/create_defs.pl $CONNECTIONPAR --db=$schema --table=$TABLENAME_SQL [$DEFINITIONFILE]";
+                    fi
+                    `$EXECDIR/create_defs.pl $CONNECTIONPAR --db=$schema --table=$TABLENAME_SQL | sed  -e "s/${table}/${TABLEDEFINITIONNAME}/g" > $DEFINITIONFILE`;
+                    `echo "" > ${DESTDIR}/${SCHEMA_RECOVERY}/tablesdef/table_defs.${schema}.${TABLEFILTERNAME}.sql`;
+                else
+                    if [ $VERBOSE -eq 1  ] ; then
+                        echo "create_defs.pl $CONNECTIONPAR --db=$schema --table=$TABLENAME_SQL  [$DEFINITIONFILE]" ;
+                    fi
+                    `$EXECDIR/create_defs.pl $CONNECTIONPAR --db=$schema --table=$TABLENAME_SQL > $DEFINITIONFILE`
+                
+                fi
+
                 if [ $PARTITIONINDEX -gt 0 ]
                 then
                     #echo "${EXECDIR}/include/table_defs.${schema}.${TABLEFILTERNAME}.defrecovery"
                     `echo "" > ${EXECDIR}/include/table_defs.${schema}.${TABLEFILTERNAME}.defrecovery`
                 fi    
+                
                 
             done;
         done;
